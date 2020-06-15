@@ -23,14 +23,14 @@ from tensorboardX import SummaryWriter
 
 
 parser = argparse.ArgumentParser(description='cifar10 classification models')
-parser.add_argument('--lr', default=0.1, help='')
+parser.add_argument('--lr', default=0.1, type=float, help='')
 parser.add_argument('--resume', default=None, help='')
 parser.add_argument('--batch_size', type=int, default=768, help='')
 parser.add_argument('--num_workers', type=int, default=4, help='')
 parser.add_argument("--gpu_devices", type=int, nargs='+', default=None, help="")
 
 parser.add_argument('--gpu', default=None, type=int, help='GPU id to use.')
-parser.add_argument('--dist-url', default='tcp://127.0.0.1:3456', type=str, help='')
+parser.add_argument('--dist-url', default='tcp://163.239.122.77:23456', type=str, help='')
 parser.add_argument('--dist-backend', default='nccl', type=str, help='')
 parser.add_argument('--rank', default=0, type=int, help='')
 parser.add_argument('--world_size', default=1, type=int, help='')
@@ -51,11 +51,21 @@ def main():
         
         
 def main_worker(gpu, ngpus_per_node, args):
+    print (f'@ main_worker: gpu:{gpu}, ngpus_per_node: {ngpus_per_node} rank: {args.rank}')
+
     args.gpu = gpu
-    ngpus_per_node = torch.cuda.device_count()    
+            
+    ngpus_per_node = torch.cuda.device_count()
+
+    print('ngpus_per_node: ', ngpus_per_node, 'rank: ', args.rank)
+    
     print("Use GPU: {} for training".format(args.gpu))
-        
+    
     args.rank = args.rank * ngpus_per_node + gpu    
+
+    print(f'\targs.rank updated: {args.rank}')
+    print(f'\tbackend: {args.dist_backend}, init_method={args.dist_url}, world_size={args.world_size}')
+
     dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
                             world_size=args.world_size, rank=args.rank)
 
@@ -68,6 +78,9 @@ def main_worker(gpu, ngpus_per_node, args):
     net = torch.nn.parallel.DistributedDataParallel(net, device_ids=[args.gpu])
     num_params = sum(p.numel() for p in net.parameters() if p.requires_grad)
     print('The number of parameters of model is', num_params)
+
+    print("\tbatch_size: ", args.batch_size, ngpus_per_node)
+    print("\tlearning_rate: ", args.lr)
 
     print('==> Preparing data..')
     transforms_train = transforms.Compose([
@@ -91,6 +104,8 @@ def main_worker(gpu, ngpus_per_node, args):
     optimizer = optim.SGD(net.parameters(), lr=args.lr, 
                           momentum=0.9, weight_decay=1e-4)
     
+    train(net, criterion, optimizer, train_loader, args.gpu)
+    print('second epoch ---------------------')
     train(net, criterion, optimizer, train_loader, args.gpu)
             
 
@@ -123,10 +138,10 @@ def train(net, criterion, optimizer, train_loader, device):
         
         batch_time = time.time() - start
         
-        if batch_idx % 20 == 0:
+        if batch_idx % 20 == 0 or batch_idx == len(train_loader)-1:
             print('Epoch: [{}/{}]| loss: {:.3f} | acc: {:.3f} | batch time: {:.3f}s '.format(
                 batch_idx, len(train_loader), train_loss/(batch_idx+1), acc, batch_time))
-    
+
     elapse_time = time.time() - epoch_start
     elapse_time = datetime.timedelta(seconds=elapse_time)
     print("Training time {}".format(elapse_time))
